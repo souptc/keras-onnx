@@ -68,6 +68,21 @@ def convert_keras(model, name=None, doc_string='', target_opset=None, channel_fi
 
     name = name or model.name
     target_opset = target_opset or get_opset_number_from_onnx()
+    if (is_tf2 and not model._is_graph_network and  # pylint:disable=protected-access
+            not isinstance(model, keras.engine.sequential.Sequential)):
+
+        # fall back to tf2onnx converter
+        from tf2onnx.tf_loader import freeze_func
+        if not hasattr(model, 'predict_function'):
+            raise RuntimeError('In tf2.0 eager mode, please call a model.predict before conversion.')
+        concrete_func = model.predict_function._graph_fn
+        concrete_func.graph.variables = model.variables
+        graph_def = freeze_func(concrete_func, [ts_.name for ts_ in model.outputs])
+        oxml = convert_tensorflow(graph_def, **build_io_names_tf2onnx(model),
+                                  target_opset=target_opset, channel_first_inputs=channel_first_inputs,
+                                  debug_mode=debug_mode, custom_op_conversions=custom_op_conversions)
+        return oxml
+
     output_names = [n.name for n in model.outputs]
 
     static_set_ke2onnx_converters(set_converter)
@@ -86,8 +101,9 @@ def convert_keras(model, name=None, doc_string='', target_opset=None, channel_fi
 
 
 def build_io_names_tf2onnx(model):
+    inames = model.inputs.values() if isinstance(model.inputs, dict) else model.inputs
     return {
-        'input_names': [n_.name for n_ in model.inputs],
+        'input_names': [n_.name for n_ in inames],
         'output_names': [n_.name for n_ in model.outputs]
     }
 
@@ -160,7 +176,8 @@ def convert_tensorflow(frozen_graph_def,
     if not doc_string:
         doc_string = "converted from {}".format(name)
 
-    tf_graph_def = tf2onnx.tfonnx.tf_optimize(input_names, output_names, frozen_graph_def, True)
+    # tf_graph_def = tf2onnx.tfonnx.tf_optimize(input_names, output_names, frozen_graph_def, True)
+    tf_graph_def = frozen_graph_def
     with tf.Graph().as_default() as tf_graph:
         tf.import_graph_def(tf_graph_def, name='')
 
