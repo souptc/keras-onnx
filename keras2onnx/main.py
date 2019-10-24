@@ -70,15 +70,37 @@ def convert_keras(model, name=None, doc_string='', target_opset=None, channel_fi
     target_opset = target_opset or get_opset_number_from_onnx()
     if (is_tf2 and not model._is_graph_network and  # pylint:disable=protected-access
             not isinstance(model, keras.engine.sequential.Sequential)):
-
         # fall back to tf2onnx converter
-        from tf2onnx.tf_loader import freeze_func
-        if not hasattr(model, 'predict_function'):
-            raise RuntimeError('In tf2.0 eager mode, please call a model.predict before conversion.')
-        concrete_func = model.predict_function._graph_fn
-        concrete_func.graph.variables = model.variables
-        graph_def = freeze_func(concrete_func, [ts_.name for ts_ in model.outputs])
-        oxml = convert_tensorflow(graph_def, **build_io_names_tf2onnx(model),
+        from tensorflow.core.protobuf import config_pb2
+        from tensorflow.python.keras.saving import saving_utils as _saving_utils
+        from tensorflow.lite.python.util import run_graph_optimizations as _run_graph_optimizations
+        from tensorflow.python.framework import convert_to_constants as _convert_to_constants
+
+        function = _saving_utils.trace_model_call(model)
+        concrete_func = function.get_concrete_function()
+        frozen_func = _convert_to_constants.convert_variables_to_constants_v2(
+            concrete_func, lower_control_flow=True)
+
+        input_tensors = [
+            tensor for tensor in frozen_func.inputs
+            if tensor.dtype != tf.dtypes.resource
+        ]
+        output_tensors = frozen_func.outputs
+        graph_def = frozen_func.graph.as_graph_def()
+
+        config = config_pb2.ConfigProto()
+        rewrite_options = config.graph_options.rewrite_options
+        rewrite_options.constant_folding = rewrite_options.ON
+
+        graph_def = _run_graph_optimizations(
+            graph_def,
+            input_tensors,
+            output_tensors,
+            config=config,
+            graph=frozen_func.graph)
+        oxml = convert_tensorflow(graph_def,
+                                  input_names=[ts_.name for ts_ in input_tensors],
+                                  output_names=[ts_.name for ts_ in output_tensors],
                                   target_opset=target_opset, channel_first_inputs=channel_first_inputs,
                                   debug_mode=debug_mode, custom_op_conversions=custom_op_conversions)
         return oxml
