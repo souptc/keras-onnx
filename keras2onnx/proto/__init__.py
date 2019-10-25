@@ -26,7 +26,7 @@ def _check_onnx_version():
 
 _check_onnx_version()
 is_tf_keras = True
-if os.environ.get('TF_KERAS', '0') == '0':
+if os.environ.get('TF_KERAS', '1') == '0':
     is_tf_keras = False
 
 if is_tf_keras:
