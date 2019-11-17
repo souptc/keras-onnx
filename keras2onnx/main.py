@@ -18,7 +18,7 @@ from .funcbook import set_converter
 
 
 def convert_keras(model, name=None, doc_string='', target_opset=None, channel_first_inputs=None, debug_mode=False,
-                  custom_op_conversions=None):
+                  custom_op_conversions=None, include_loss=False):
     # type: (keras.Model, str, str, int, [], bool, {}) -> onnx.ModelProto
     """
     :param model: keras model
@@ -38,7 +38,7 @@ def convert_keras(model, name=None, doc_string='', target_opset=None, channel_fi
 
     name = name or model.name
     target_opset = target_opset or get_opset_number_from_onnx()
-    output_names = [n.name for n in model.outputs]
+    output_names = [n.name for n in model.outputs] if not include_loss else [model.total_loss.name]
 
     static_set_ke2onnx_converters(set_converter)
 
@@ -48,7 +48,7 @@ def convert_keras(model, name=None, doc_string='', target_opset=None, channel_fi
                         target_opset=target_opset,
                         custom_op_dict=custom_op_conversions)
     topology.debug_mode = debug_mode
-    parse_graph(topology, tf_graph, target_opset, output_names)
+    parse_graph(topology, tf_graph, target_opset, output_names, training_mode=include_loss)
     topology.compile()
 
     return convert_topology(topology, name, doc_string, target_opset, channel_first_inputs)
